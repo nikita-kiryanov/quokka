@@ -1,0 +1,15 @@
+@import "tailwindcss";
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center justify-center rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:bg-neutral-600 disabled:hover:bg-neutral-600;
+  }
+
+  .checkbox-label {
+    @apply inline-flex select-none items-center gap-2 text-sm font-medium text-neutral-200;
+  }
+
+  .checkbox-input {
+    @apply size-4 rounded border-neutral-500 bg-neutral-800 text-emerald-600 focus:ring-emerald-500;
+  }
+}
