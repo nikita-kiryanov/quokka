@@ -1,0 +1,6 @@
+-- SCHEMA: books
+
+-- DROP SCHEMA IF EXISTS books ;
+
+CREATE SCHEMA IF NOT EXISTS books
+    AUTHORIZATION postgres;
