@@ -1,0 +1,198 @@
+import { lazy, useCallback, useMemo, useState, type ReactNode } from "react";
+import { EditorContext } from "../utils/editor/useEditor";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useBaseUrl } from "../utils/BaseUrlContext";
+import { GAME_PLACEHOLDER } from "../utils/placeholders";
+import useDataSet from "../utils/editor/useDataSet";
+import useCacheBuster from "../utils/useCacheBuster";
+import Button from "../utils/elements/Button";
+
+const TagInputs = lazy(() => import("../utils/editor/TagInputs"));
+const InputLabelDataList = lazy(() => import("../utils/editor/InputLabelDataList"));
+const ArtFetcher = lazy(() => import("../utils/ArtFetcher"));
+const Checkbox = lazy(() => import("../utils/elements/Checkbox"));
+const Input = lazy(() => import("../utils/elements/Input"));
+const FileUploadInput = lazy(() => import("../utils/elements/FileUploadInput"));
+
+type InputChange = React.ChangeEvent<HTMLInputElement>;
+type TextAreaChange = React.ChangeEvent<HTMLTextAreaElement>;
+
+export function EditorProvider({ children }: { children: ReactNode }) {
+    const baseUrl = useBaseUrl();
+    const queryClient = useQueryClient();
+    const [title, setTitle] = useState<string>('');
+    const [formState, setFormState] = useState<any>(null);
+    const [_, setNextVersion] = useCacheBuster();
+
+    const series = useDataSet('dataset/series', formState != null);
+    const franchise = useDataSet('dataset/franchise', formState != null);
+    const games = useDataSet('dataset/games', formState != null);
+
+    const payloadTranslator = (data: any) => {
+        const payload: any = {
+            games: {
+                played: data.played || false,
+                dlc_for: data.dlc_for_name || null,
+                comments: data.comments || null,
+                game_name: data.game,
+                remake_for: data.remake_for_name || null,
+                series_name: data.series || null,
+                franchise_name: data.franchise || null,
+                chronology_date: data.chronology_date || null,
+                initial_release_date: data.initial_release_date || null,
+            },
+            games_to_game_genres: {
+                game_genres: data.game_genres || [],
+            },
+            games_to_content_genres: {
+                content_genres: data.content || [],
+            },
+            games_to_developers: {
+                developers: data.developers || [],
+            },
+            game_id: data.game_id || null,
+            thumbnail: data.thumbnail,
+        };
+
+        return payload;
+    }
+
+    const mutation = useMutation({
+        mutationFn: async (newGame: any): Promise<{success: boolean}> => {
+            const url = `${baseUrl}/games` + (newGame.game_id ? `/${newGame.game_id}` : '');
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(payloadTranslator(newGame)),
+            });
+
+            if (!response.ok) {
+                throw new Error(`Failed to create game: ${response.status}`);
+            }
+
+            return response.json();
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({queryKey: ['games']});
+            queryClient.invalidateQueries({queryKey: [`${baseUrl}/stats`]});
+            queryClient.invalidateQueries({queryKey: [`${baseUrl}/timeline`]});
+            setNextVersion();
+            closeEditor();
+        },
+    });
+
+    function onChange(data: Object) {
+        setFormState((prevState: Object) => ({ ...prevState, ...data }));
+    }
+
+    const openEditor = useCallback((title: string, id: number | null, content: any) => {
+        setFormState({...content, game_id: id});
+        setTitle(title);
+    }, []);
+
+    const closeEditor = useCallback(() => {
+        setFormState(null);
+        setTitle('');
+    }, []);
+
+    const contextValue = useMemo(() => ({ openEditor, closeEditor }), [openEditor, closeEditor]);
+
+    const artSearchName = () => {
+        if (!formState.game)
+            return '';
+        let name = formState.game;
+        if (formState.initial_release_date) {
+            const year = formState.initial_release_date.slice(0, 4);
+            name += ` (${year})`;
+        }
+        return name;
+    };
+
+    if (!series.isFetched || !franchise.isFetched || !games.isFetched || !formState) {
+        return (
+            <EditorContext.Provider value={contextValue}>
+                {children}
+            </EditorContext.Provider>
+        );
+    }
+
+    return (
+      <EditorContext.Provider value={contextValue}>
+        {children}
+        <div className="fixed inset-0 flex items-center bg-neutral-900/50 backdrop-blur z-30" onClick={(e) => (e.target === e.currentTarget) && closeEditor()}>
+          <div className="rounded-xl border border-blue-500 bg-neutral-700 text-center w-full overflow-hidden max-h-[90vh]">
+            <div className="overflow-y-auto max-h-[90vh] p-6 scheme-dark">
+              <h2 className="text-2xl mb-4">{title}</h2>
+              <div className="grid grid-cols-1 sm:block sm:columns-2 sm:space-y-4 lg:grid lg:columns-auto lg:space-y-0 lg:grid-cols-3 xl:grid-cols-6 w-full gap-4">
+                <div className="break-inside-avoid lg:col-start-1 lg:row-start-1 xl:col-start-1 xl:row-start-1">
+                  <InputLabelDataList label="Name" value={formState.game || ''}
+                                      onChange={(e: InputChange) => { onChange({ game: e.target.value }) }} />
+                </div>
+                <div className="break-inside-avoid lg:col-start-1 lg:row-start-2 xl:col-start-1 xl:row-start-2">
+                  <InputLabelDataList label="Series" value={formState.series || ''} suggestions={series.data}
+                                      onChange={(e: InputChange) => { onChange({ series: e.target.value }) }} />
+                </div>
+                <div className="break-inside-avoid lg:col-start-1 lg:row-start-3 xl:col-start-1 xl:row-start-3">
+                  <InputLabelDataList label="Franchise"
+                                      value={formState.franchise || ''} suggestions={franchise.data}
+                                      onChange={(e: InputChange) => onChange({ franchise: e.target.value })} />
+                  <Checkbox label="Played" checked={formState.played || false}
+                            onChange={(e: InputChange) => onChange({ played: e.target.checked })} />
+                </div>
+                <div className="break-inside-avoid lg:col-start-2 lg:row-start-1 xl:col-start-2 xl:row-start-1">
+                  <InputLabelDataList label="DLC For"
+                                      value={formState.dlc_for_name || ''} suggestions={games.data}
+                                      onChange={(e: InputChange) => { onChange({ dlc_for_name: e.target.value }) }} />
+                </div>
+                <div className="break-inside-avoid lg:col-start-2 lg:row-start-2 xl:col-start-2 xl:row-start-2">
+                  <InputLabelDataList label="Remake For"
+                                      value={formState.remake_for_name || ''} suggestions={games.data}
+                                      onChange={(e: InputChange) => { onChange({ remake_for_name: e.target.value }) }} />
+                </div>
+                <div className="break-inside-avoid lg:col-start-2 lg:row-start-3 xl:col-start-3 xl:row-start-1">
+                  <Input type="date" label="Release Date" value={formState.initial_release_date || ''}
+                         onChange={(e: InputChange) => { onChange({ initial_release_date: e.target.value }) }} />
+                </div>
+                <div className="break-inside-avoid lg:col-start-2 lg:row-start-4 xl:col-start-3 xl:row-start-2">
+                  <Input type="date" label="Chronology Date" value={formState.chronology_date || ''}
+                         onChange={(e: InputChange) => { onChange({ chronology_date: e.target.value }) }} />
+                </div>
+                <div className="break-inside-avoid lg:col-start-1 lg:row-start-4 xl:col-start-2 xl:row-start-3 xl:col-span-2">
+                  <label htmlFor="i-comments" className="block text-sm font-medium text-neutral-300 mb-1">
+                    Comments
+                  </label>
+                  <textarea className="w-full min-h-20 rounded-md border border-blue-500 bg-neutral-700/50 p-2 text-left text-sm"
+                            name="comments" id="i-comments" value={formState.comments || ''}
+                            onChange={(e: TextAreaChange) => { onChange({ comments: e.target.value }) }} />
+                </div>
+                <div className="break-inside-avoid lg:col-start-3 lg:row-start-1 xl:col-start-4 xl:row-start-1 xl:row-span-3">
+                  <TagInputs search="genre" items={formState.game_genres || []} label="Genres"
+                             onChange={(game_genres: string[]) => { onChange({ game_genres }) }} />
+                </div>
+                <div className="break-inside-avoid lg:col-start-3 lg:row-start-2 xl:col-start-5 xl:row-start-1 xl:row-span-3">
+                  <TagInputs search="content" items={formState.content || []} label="Content"
+                            onChange={(content: string[]) => { onChange({ content }) }} />
+                </div>
+                <div className="break-inside-avoid lg:col-start-3 lg:row-start-3 xl:col-start-6 xl:row-start-1 xl:row-span-3">
+                  <TagInputs search="developer" items={formState.developers || []} label="Developers"
+                             onChange={(developers: string[]) => { onChange({ developers }) }} />
+                </div>
+                <div className="break-inside-avoid lg:col-start-3 lg:row-start-4 xl:col-start-4 xl:row-start-3">
+                  <ArtFetcher subject={artSearchName()} placeholder={GAME_PLACEHOLDER}
+                              onSelect={(url: string | null) => { onChange({ thumbnail: url }) }}
+                              current={`thumbnails/games/${formState.game_id}.webp`} key={formState.game_id} />
+                  <FileUploadInput label="OR" onChange={(thumbnail) => onChange({ thumbnail })} />
+                </div>
+                <div className="break-inside-avoid col-span-full xl:col-start-1 xl:row-start-5 xl:col-span-6 flex gap-2 justify-center">
+                  <Button onClick={() => { mutation.mutate(formState) }} text="Save" />
+                  <Button onClick={() => closeEditor()} text="Cancel" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </EditorContext.Provider>
+    );
+}

@@ -1,0 +1,6 @@
+-- SCHEMA: movies
+
+-- DROP SCHEMA IF EXISTS movies ;
+
+CREATE SCHEMA IF NOT EXISTS movies
+    AUTHORIZATION postgres;
